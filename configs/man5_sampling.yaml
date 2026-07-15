@@ -1,0 +1,29 @@
+# Initial, conservative Man5 sampling configuration.
+#
+# IMPORTANT: angle conventions vary with atom ordering and may differ by ~180°
+# or sign between publications/software. These initial settings use the template
+# PDB angles plus Gaussian jitter. Literature-derived absolute CHI distributions
+# can replace these entries after convention validation.
+
+default:
+  phi:
+    mode: template_jitter
+    sd: 12.0
+  psi:
+    mode: template_jitter
+    sd: 18.0
+  omega:
+    mode: template_jitter
+    sd: 15.0
+
+# Linkage-specific overrides can use absolute normal distributions, for example:
+# linkages:
+#   alpha1-3:
+#     phi: {mode: normal, mean: -80.0, sd: 10.0}
+#     psi: {mode: normal, mean: 145.0, sd: 15.0}
+#   alpha1-6:
+#     omega:
+#       mode: discrete
+#       values: [-60.0, 60.0, 180.0]
+#       weights: [0.3, 0.3, 0.4]
+linkages: {}

@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+
+# Environments
+.env
+.venv/
+venv/
+env/
+conda-env/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Generated glycan libraries
+*.npz
+*_library.pdb
+*_library.npz
+
+# Generated structures and outputs
+output/
+outputs/
+results/
+work/
+*_fast_man5/
+Glyc_Des_*.pdb
+*_manifest.json
+*_placed.npz
+
+# Rosetta temporary/output files
+score.sc
+*.fasc
+*.silent
+*.out
+rosetta_crash.log
+ROSETTA_CRASH.log
+
+# Logs
+*.log
