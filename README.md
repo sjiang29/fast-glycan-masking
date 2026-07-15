@@ -1,222 +1,302 @@
-# Fast multi-site Man5 masking pipeline
+# Fast Glycan Masking
 
-This package keeps the **FastDesign sequon-creation step** from the original Rosetta workflow and replaces only the slow `GlycanTreeModeler` ensemble-generation step.
+A fast conformer-library approach for generating ensembles of **Man5-glycosylated antigen structures** for antibody docking.
 
-## Final workflow
+This project replaces the computationally expensive **Rosetta GlycanTreeModeler** ensemble generation step with a reusable glycan conformer library. Instead of rebuilding and optimizing glycans for every antigen, the pipeline generates a library of physically reasonable Man5 conformations once and rapidly places them onto one or more glycosylation sites.
 
-```text
-Input antigen
-    ↓
-Rosetta FastDesign for new masking sites that are not yet N-X-S/T
-    ↓
-Validate every requested native and engineered site
-    ↓
-Strip existing carbohydrate coordinates by default
-    ↓
-Place one sampled Man5 conformer at every requested site
-    ↓
-Check protein–glycan and glycan–glycan clashes jointly
-    ↓
-Write 100 complete multi-glycosylated antigen models
-    ↓
+The resulting glycosylated antigen ensembles can be used for downstream antibody docking and glycan masking studies.
+
+---
+
+## Motivation
+
+The original glycan masking workflow consists of:
+
+```
+Protein
+    │
+    ▼
+Rosetta FastDesign
+    │
+    ▼
+SimpleGlycosylateMover
+    │
+    ▼
+GlycanTreeModeler
+    │
+    ▼
+100 glycosylated antigen models
+    │
+    ▼
 Antibody docking
 ```
 
-A native site such as `A:200` and a new masking site such as `A:87` can therefore appear in the **same output structure**, with both glycans sampled independently.
+While accurate, **GlycanTreeModeler** is computationally expensive because every glycosylation site requires repeated glycan conformational sampling and optimization.
 
-## Files
+The goal of this project is **not** to reproduce the Rosetta energy minimum.
 
-- `glycan_rotamer_generator.py` — creates a reusable Man5 conformer library from one Rosetta glycoprotein reference.
-- `glycan_library_placer.py` — places the library at one or more already valid N-X-S/T sites.
-- `fast_glycan_masking.py` — recommended wrapper: runs FastDesign when needed, validates sites, then calls the multi-site placer.
-- `man5_sampling.yaml` — linkage-specific torsion sampling configuration.
-- `rotamer_library_generator.py` — colleague-provided geometry helpers used by the generator.
-- `requirements_fast_man5.txt` — Python dependencies.
+Instead, the goal is to efficiently generate **physically reasonable glycan conformations** suitable for antibody docking.
 
-## Installation
+The new workflow is
 
-```bash
-python -m pip install -r requirements_fast_man5.txt
+```
+Reference Man5 structure
+          │
+          ▼
+Generate reusable conformer library
+          │
+          ▼
+FastDesign (optional)
+          │
+          ▼
+Place glycan conformers
+          │
+          ▼
+Protein/Glycan clash filtering
+          │
+          ▼
+100 glycosylated antigen models
+          │
+          ▼
+Antibody docking
+```
+
+The conformer library is generated once and reused for all proteins.
+
+---
+
+# Repository structure
+
+```
+fast-glycan-masking/
+│
+├── README.md
+├── LICENSE
+├── requirements.txt
+├── .gitignore
+│
+├── configs/
+│   └── man5_sampling.yaml
+│
+├── src/
+│   └── fast_glycan_masking/
+│       ├── __init__.py
+│       ├── glycan_rotamer_generator.py
+│       ├── glycan_library_placer.py
+│       └── fast_glycan_masking.py
+│
+├── scripts/
+│   ├── generate_man5_library.sh
+│   └── place_multiple_glycans.sh
+│
+├── examples/
+│   ├── reference_glycoprotein.pdb
+│   ├── designed_antigen.pdb
+│   └── README.md
+│
+├── docs/
+│   └── pipeline_overview.md
+│
+└── tests/
 ```
 
 ---
 
-## Step 1: generate the reusable Man5 library once
+# Installation
 
-Use a Rosetta-generated structure that already contains a complete Man5 glycan at a known ASN, for example `A:200`:
+Clone the repository
 
 ```bash
-python glycan_rotamer_generator.py \
-  --pdb Glyc_Des_head_6uig_cut_ABC_A_0001_0001.pdb \
-  --chain A \
-  --resid 200 \
-  --config man5_sampling.yaml \
-  --n-models 10000 \
-  --max-attempts 1000000 \
-  --seed 2026 \
-  --clash-cutoff 2.0 \
-  --exclude-bonds 3 \
-  --out-prefix Man5_library
+git clone https://github.com/sjiang29/fast-glycan-masking.git
+cd fast-glycan-masking
 ```
 
-Outputs:
+Install dependencies
 
-```text
-Man5_library.pdb   # visualization/debugging
-Man5_library.npz   # main binary library used by the placer
+```bash
+pip install -r requirements.txt
 ```
 
-The NPZ stores the glycan coordinates, atom/residue metadata, torsion values, sugar linkage topology, and the source ASN `CB/CG/ND2` attachment frame.
+Add the source directory to your Python path
+
+```bash
+export PYTHONPATH=$PWD/src:$PYTHONPATH
+```
 
 ---
 
-## Option A: place glycans when all sequons already exist
+# Workflow
 
-Use `glycan_library_placer.py` directly. Repeat `--site` for every glycan that should be present in each output model.
+The pipeline consists of two independent stages.
 
-### One native site
+## Stage 1 — Generate a reusable Man5 conformer library
 
-```bash
-time python glycan_library_placer.py \
-  --library Man5_library.npz \
-  --protein Des_head_6uig_cut_ABC_A_0001.pdb \
-  --site A:200 \
-  --n-models 100 \
-  --clash-mode vdw \
-  --vdw-scale 0.70 \
-  --out-dir A200_fast_man5 \
-  --prefix Glyc_Des_A200
-```
-
-### Native A200 plus new A87 simultaneously
-
-This command assumes A87 already satisfies N-X-S/T:
+This stage only needs to be performed once.
 
 ```bash
-time python glycan_library_placer.py \
-  --library Man5_library.npz \
-  --protein designed_antigen.pdb \
-  --site A:200 \
-  --site A:87 \
-  --n-models 100 \
-  --max-attempts 100000 \
-  --clash-mode vdw \
-  --vdw-scale 0.70 \
-  --out-dir A200_A87_fast_man5 \
-  --prefix Glyc_Des_A200_A87
+python -m fast_glycan_masking.glycan_rotamer_generator \
+    --pdb examples/reference_glycoprotein.pdb \
+    --chain A \
+    --resid 200 \
+    --config configs/man5_sampling.yaml \
+    --n-conformers 10000 \
+    --out-prefix Man5_library
 ```
 
-For each final model, the program independently chooses one conformer for A200 and one for A87. It does **not** enumerate the full Cartesian product. It rejects a proposed combination if either glycan clashes with the protein or if the two glycans clash with each other.
+Output
+
+```
+Man5_library.npz
+Man5_library.pdb
+```
+
+The generated library can be reused for all future glycan placement jobs.
 
 ---
 
-## Option B: create a new sequon with FastDesign, then place all glycans
+## Stage 2 — Prepare glycosylation sites
 
-This is the recommended replacement for the old complete workflow.
+New glycosylation sites must satisfy the canonical N-linked sequon
+
+```
+N-X-S/T
+```
+
+where
+
+* X can be any residue except Proline.
+
+If the target site already satisfies this requirement, this step can be skipped.
+
+Otherwise, use the existing Rosetta FastDesign workflow to introduce the N-linked sequon before glycan placement.
+
+---
+
+## Stage 3 — Place glycans
+
+### Single-site placement
 
 ```bash
-time python fast_glycan_masking.py \
-  --protein head_6uig_cut_ABC_A.pdb \
-  --library Man5_library.npz \
-  --new-site A:87 \
-  --native-site A:200 \
-  --n-models 100 \
-  --fastdesign-template glycan_template_files/template_FastDesign.xml \
-  --fastdesign-script glycan_template_files/fast_design.sh \
-  --work-dir pos_87_fastdesign \
-  --out-dir pos_87_fast_man5 \
-  --prefix Glyc_Des_A87_A200
+python -m fast_glycan_masking.glycan_library_placer \
+    --library Man5_library.npz \
+    --protein examples/designed_antigen.pdb \
+    --site A:87 \
+    --n-models 100 \
+    --out-dir outputs/A87 \
+    --prefix Glyc_Des_A87
 ```
 
-The wrapper does the following:
+### Multiple-site placement
 
-1. Checks the new site.
-2. Creates a Rosetta resfile when mutations are required:
-   - position `i` → ASN;
-   - position `i+1` → ALA only when it is PRO;
-   - position `i+2` → THR when it is not already SER or THR.
-3. Updates the `<ReadResfile filename="...">` entry in the FastDesign XML.
-4. Runs `fast_design.sh`.
-5. Validates N-X-S/T after FastDesign.
-6. Places and jointly filters Man5 at both A87 and A200.
-
-Multiple new and native sites are supported:
+Native and engineered glycosylation sites can be sampled simultaneously.
 
 ```bash
---new-site A:87 \
---new-site A:145 \
---native-site A:200 \
---native-site B:200
+python -m fast_glycan_masking.glycan_library_placer \
+    --library Man5_library.npz \
+    --protein examples/designed_antigen.pdb \
+    --site A:87 \
+    --site A:200 \
+    --n-models 100 \
+    --out-dir outputs/A87_A200 \
+    --prefix Glyc_Des_A87_A200
 ```
 
-## Sequon validation
+For each output model, the program
 
-Every requested position is checked as:
+1. randomly samples one Man5 conformer for each glycosylation site,
+2. aligns each glycan onto its target ASN,
+3. checks protein–glycan clashes,
+4. checks glycan–glycan clashes,
+5. writes only clash-free glycoprotein models.
 
-```text
-position i     = N
-position i+1   ≠ P
-position i+2   = S or T
+---
+
+## Stage 4 — Antibody docking
+
+The generated glycosylated antigen ensemble can be directly used in downstream antibody docking workflows.
+
+---
+
+# Library format
+
+Two files are generated.
+
+### Man5_library.pdb
+
+A multi-model PDB containing all generated Man5 conformers.
+
+Useful for
+
+- PyMOL
+- ChimeraX
+- visualization
+- debugging
+
+### Man5_library.npz
+
+A compressed NumPy archive containing
+
+- Cartesian coordinates
+- atom names
+- residue names
+- residue indices
+- glycan topology
+- attachment frame
+- sampled torsion angles
+
+This binary format is significantly faster than repeatedly parsing PDB files during glycan placement.
+
+---
+
+# Sampling strategy
+
+Unlike uniform torsion sampling, glycosidic torsion angles are sampled according to linkage-specific conformational preferences reported in the carbohydrate literature.
+
+Each glycosidic linkage type (β1→4, α1→3, α1→6, etc.) can use independent φ/ψ/ω distributions defined in
+
+```
+configs/man5_sampling.yaml
 ```
 
-`glycan_library_placer.py` stops with an error if a site is invalid. Do not use `--skip-sequon-validation` for production structures.
+This allows the conformer library to approximate experimentally observed carbohydrate conformations while avoiding computationally expensive Rosetta optimization.
 
-## Existing/native glycans
+---
 
-By default the placer removes carbohydrate residues already present in the input and rebuilds all requested sites from the conformer library. This mirrors the old Rosetta XML behavior:
+# Current limitations
 
-```xml
-strip_existing="1"
-```
+- Currently supports **N-linked Man5** glycans.
+- Designed for antibody docking rather than atomistic free-energy calculations.
+- No Rosetta minimization is performed after glycan placement.
+- Placement assumes an ASN attachment geometry.
+- Sampling distributions should use linkage-specific torsion conventions consistent with the chosen carbohydrate definition.
 
-This is appropriate when native A200 should vary across the same 100-model ensemble as the new masking glycan.
+---
 
-Use `--keep-existing-glycans` only when you intentionally want existing carbohydrate coordinates to remain fixed. Be careful not to request placement at a site that is already occupied, because that would duplicate the glycan.
+# Future work
 
-## Clash filtering
+Planned extensions include
 
-Recommended initial setting:
+- Man9 support
+- Hybrid glycans
+- Complex glycans
+- Flexible post-placement refinement
+- GPU-accelerated clash detection
+- Automatic torsion distributions derived from experimentally observed glycans
 
-```bash
---clash-mode vdw --vdw-scale 0.70
-```
+---
 
-A clash is defined as:
+# Citation
 
-```text
-distance < vdw_scale × (radius atom 1 + radius atom 2)
-```
+If this software contributes to your work, please cite
 
-Smaller values are more permissive. A practical calibration range is approximately `0.60–0.75`.
+1. RosettaCarbohydrates
+2. GlycanTreeModeler
+3. Relevant carbohydrate conformational sampling literature
 
-Fixed-distance mode is also available:
+---
 
-```bash
---clash-mode distance --clash-cutoff 2.0
-```
+# Acknowledgements
 
-The requested ASN residues are excluded from the protein clash test by default so that the inherited covalent attachment geometry is not rejected. All other protein atoms and all pairs of placed glycans are checked.
+This project was developed in the Meiler Laboratory at Vanderbilt University.
 
-## Outputs
-
-For 100 requested models:
-
-```text
-output_directory/
-    Glyc_Des_..._0001.pdb
-    Glyc_Des_..._0002.pdb
-    ...
-    Glyc_Des_..._0100.pdb
-    Glyc_Des_..._placed.npz
-    Glyc_Des_..._manifest.json
-```
-
-Each PDB contains the full antigen plus all requested Man5 trees. The manifest records the site list, selected library conformer for every site/model, clash settings, and acceptance statistics.
-
-## Important assumptions and validation
-
-- FastDesign remains responsible for creating a chemically and structurally reasonable ASN site.
-- The fast method does not perform Rosetta minimization or nearby side-chain repacking after glycan placement.
-- A clash-free conformation is not necessarily the global energy minimum.
-- Before replacing production results, compare antibody docking from the fast and GlycanTreeModeler ensembles at several exposed and partially buried sites.
-- The current implementation targets Rosetta-style N-linked Man5 trees represented by `LINK` records.
+The original generic rotamer generation framework for small molecules was developed by a laboratory colleague and adapted here for branched glycan conformational sampling and glycan masking applications.
