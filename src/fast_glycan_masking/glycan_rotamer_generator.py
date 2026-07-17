@@ -26,7 +26,7 @@ from typing import Dict, Iterable, List, Mapping, Sequence, Set, Tuple
 import numpy as np
 import yaml
 
-from rotamer_library_generator import (
+from .rotamer_library_generator import (
     Atom,
     bond_graph_distances,
     build_bonds,
@@ -254,7 +254,7 @@ def self_clash_pairs(atoms: Sequence[Atom], adj: Sequence[Set[int]], exclude_bon
 
 
 def generate(atoms: Sequence[Atom], adj: Sequence[Set[int]], torsions: Sequence[GlycoTorsion],
-             cfg: Mapping, n_models: int, max_attempts: int, seed: int,
+             cfg: Mapping, n_conformers: int, max_attempts: int, seed: int,
              clash_cutoff: float, exclude_bonds: int):
     rng = np.random.default_rng(seed)
     template = np.array([a.xyz for a in atoms])
@@ -262,7 +262,7 @@ def generate(atoms: Sequence[Atom], adj: Sequence[Set[int]], torsions: Sequence[
     cutoff2 = clash_cutoff ** 2
     kept, angles = [], []
     attempts = 0
-    while len(kept) < n_models and attempts < max_attempts:
+    while len(kept) < n_conformers and attempts < max_attempts:
         attempts += 1
         xyz = template.copy(); sampled = []
         for tor in torsions:
@@ -285,7 +285,19 @@ def main(argv=None):
     ap.add_argument("--chain", required=True)
     ap.add_argument("--resid", required=True, type=int, help="ASN residue carrying the reference glycan")
     ap.add_argument("--config", required=True)
-    ap.add_argument("--n-models", type=int, default=100)
+    ap.add_argument(
+        "--n-conformers",
+        type=int,
+        default=10000,
+        help="Number of clash-free glycan conformers to generate (default: 10000)",
+    )
+    # Backward-compatible alias used by earlier versions.
+    ap.add_argument(
+        "--n-models",
+        dest="n_conformers",
+        type=int,
+        help=argparse.SUPPRESS,
+    )
     ap.add_argument("--max-attempts", type=int, default=100000)
     ap.add_argument("--seed", type=int, default=2026)
     ap.add_argument("--clash-cutoff", type=float, default=2.0)
@@ -314,10 +326,14 @@ def main(argv=None):
 
     cfg = yaml.safe_load(open(args.config)) or {}
     coords, angle_values, attempts = generate(
-        atoms, adj, torsions, cfg, args.n_models, args.max_attempts, args.seed,
+        atoms, adj, torsions, cfg, args.n_conformers, args.max_attempts, args.seed,
         args.clash_cutoff, args.exclude_bonds)
-    if len(coords) < args.n_models:
-        print(f"[warn] generated {len(coords)}/{args.n_models} models after {attempts} attempts", file=sys.stderr)
+    if len(coords) < args.n_conformers:
+        print(
+            f"[warn] generated {len(coords)}/{args.n_conformers} conformers "
+            f"after {attempts} attempts",
+            file=sys.stderr,
+        )
     if len(coords) == 0:
         return 2
     out = Path(args.out_prefix)
@@ -354,7 +370,7 @@ def main(argv=None):
              sampled_angles=angle_values,
              source_pdb=args.pdb, source_chain=args.chain, source_resid=args.resid,
              seed=args.seed)
-    print(f"[done] wrote {out}.pdb and {out}.npz; {len(coords)} models from {attempts} attempts")
+    print(f"[done] wrote {out}.pdb and {out}.npz; {len(coords)} conformers from {attempts} attempts")
     return 0
 
 

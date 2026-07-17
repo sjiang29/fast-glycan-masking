@@ -25,7 +25,7 @@ from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
 
 import numpy as np
 
-from rotamer_library_generator import Atom, infer_element
+from .rotamer_library_generator import Atom, infer_element
 
 WATER_NAMES = {"HOH", "WAT", "H2O", "DOD", "SOL", "TIP", "TIP3", "TIP4", "TIP5", "SPC"}
 SUGAR_NAMES = {

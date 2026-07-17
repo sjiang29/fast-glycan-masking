@@ -81,6 +81,7 @@ fast-glycan-masking/
 ├── src/
 │   └── fast_glycan_masking/
 │       ├── __init__.py
+│       ├── rotamer_library_generator.py
 │       ├── glycan_rotamer_generator.py
 │       ├── glycan_library_placer.py
 │       └── fast_glycan_masking.py
@@ -102,6 +103,16 @@ fast-glycan-masking/
 
 ---
 
+`rotamer_library_generator.py` contains the generic geometry and torsion-rotation utilities used by `glycan_rotamer_generator.py`. Both files must remain inside `src/fast_glycan_masking/`. The import in `glycan_rotamer_generator.py` is package-relative:
+
+```python
+from .rotamer_library_generator import ...
+```
+
+Run the modules from the repository root with `python -m`; do not execute files inside `src/` directly.
+
+---
+
 # Installation
 
 Clone the repository
@@ -120,14 +131,14 @@ pip install -r requirements.txt
 Add the source directory to your Python path
 
 ```bash
-export PYTHONPATH=$PWD/src:$PYTHONPATH
+export PYTHONPATH="$PWD/src:${PYTHONPATH:-}"
 ```
 
 ---
 
 # Workflow
 
-The pipeline consists of two independent stages.
+The workflow consists of three preparation stages followed by antibody docking.
 
 ## Stage 1 — Generate a reusable Man5 conformer library
 
@@ -135,22 +146,50 @@ This stage only needs to be performed once.
 
 ```bash
 python -m fast_glycan_masking.glycan_rotamer_generator \
-    --pdb examples/reference_glycoprotein.pdb \
+    --pdb examples/Glyc_Des_head_6uig.pdb \
     --chain A \
     --resid 200 \
     --config configs/man5_sampling.yaml \
     --n-conformers 10000 \
-    --out-prefix Man5_library
+    --max-attempts 200000 \
+    --seed 2026 \
+    --out-prefix libraries/Man5_library
 ```
 
 Output
 
 ```
-Man5_library.npz
-Man5_library.pdb
+libraries/Man5_library.npz
+libraries/Man5_library.pdb
 ```
 
 The generated library can be reused for all future glycan placement jobs.
+
+`--n-conformers` controls the number of glycan-only conformers stored in the reusable library. This is different from `--n-models` in the placement stage, which controls the number of complete glycoprotein structures written. Because self-clashing samples are rejected, `--max-attempts` should normally be larger than `--n-conformers`.
+
+For a quick test run:
+
+```bash
+python -m fast_glycan_masking.glycan_rotamer_generator \
+    --pdb examples/Glyc_Des_head_6uig.pdb \
+    --chain A \
+    --resid 200 \
+    --config configs/man5_sampling.yaml \
+    --n-conformers 100 \
+    --max-attempts 5000 \
+    --out-prefix test_outputs/Man5_library_test
+```
+
+To inspect the detected glycan topology and torsions without generating conformers:
+
+```bash
+python -m fast_glycan_masking.glycan_rotamer_generator \
+    --pdb examples/Glyc_Des_head_6uig.pdb \
+    --chain A \
+    --resid 200 \
+    --config configs/man5_sampling.yaml \
+    --report-only
+```
 
 ---
 
@@ -178,7 +217,7 @@ Otherwise, use the existing Rosetta FastDesign workflow to introduce the N-linke
 
 ```bash
 python -m fast_glycan_masking.glycan_library_placer \
-    --library Man5_library.npz \
+    --library libraries/Man5_library.npz \
     --protein examples/designed_antigen.pdb \
     --site A:87 \
     --n-models 100 \
@@ -192,7 +231,7 @@ Native and engineered glycosylation sites can be sampled simultaneously.
 
 ```bash
 python -m fast_glycan_masking.glycan_library_placer \
-    --library Man5_library.npz \
+    --library libraries/Man5_library.npz \
     --protein examples/designed_antigen.pdb \
     --site A:87 \
     --site A:200 \
@@ -259,6 +298,48 @@ configs/man5_sampling.yaml
 ```
 
 This allows the conformer library to approximate experimentally observed carbohydrate conformations while avoiding computationally expensive Rosetta optimization.
+
+---
+
+# Troubleshooting
+
+## `ModuleNotFoundError: No module named 'fast_glycan_masking'`
+
+Run commands from the repository root and set:
+
+```bash
+export PYTHONPATH="$PWD/src:${PYTHONPATH:-}"
+```
+
+## `ModuleNotFoundError: No module named 'rotamer_library_generator'`
+
+Confirm that the file is located at:
+
+```text
+src/fast_glycan_masking/rotamer_library_generator.py
+```
+
+and that `glycan_rotamer_generator.py` uses:
+
+```python
+from .rotamer_library_generator import ...
+```
+
+Run the generator as a package module:
+
+```bash
+python -m fast_glycan_masking.glycan_rotamer_generator --help
+```
+
+Do not run:
+
+```bash
+python src/fast_glycan_masking/glycan_rotamer_generator.py
+```
+
+## `unrecognized arguments: --n-conformers`
+
+Replace `glycan_rotamer_generator.py` with the updated version in this repository. The current interface uses `--n-conformers`; the former `--n-models` spelling is retained only as a backward-compatible hidden alias.
 
 ---
 
